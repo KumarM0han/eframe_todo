@@ -1,0 +1,392 @@
+use eframe::egui::*;
+use std::collections::BTreeMap;
+use std::mem;
+use uuid::Uuid;
+
+#[derive(Copy, Clone)]
+enum State {
+    ModalNewProject,
+    ModalNewTodo(ProjectId),
+    ModalNewDesc(ProjectId, TodoId),
+
+    SwitchProject(ProjectId, Option<TodoId>),
+    SwitchTodo(ProjectId, TodoId),
+    MarkTodoForDeletion(ProjectId, TodoId),
+
+    Home(Option<TodoId>),
+}
+
+#[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
+struct ProjectId(Uuid);
+
+struct Project {
+    title: String,
+    todos: BTreeMap<TodoId, Todo>,
+}
+
+#[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
+struct TodoId(Uuid);
+
+struct Todo {
+    title: String,
+    desc: Vec<String>,
+    done: bool,
+}
+
+pub struct App {
+    projects: BTreeMap<ProjectId, Project>,
+
+    // frame data
+    state: Option<State>,
+    active_proj: Option<ProjectId>,
+    input_buffer: String,
+}
+
+impl Project {
+    fn with_title(title: &str) -> Self {
+        let mut todos = BTreeMap::new();
+        todos.insert(
+            TodoId(Uuid::now_v7()),
+            Todo {
+                title: "demo".to_string(),
+                desc: Vec::new(),
+                done: false,
+            },
+        );
+        todos.insert(
+            TodoId(Uuid::now_v7()),
+            Todo {
+                title: "demo".to_string(),
+                desc: Vec::new(),
+                done: false,
+            },
+        );
+        Self {
+            title: title.to_string(),
+            todos: todos,
+        }
+    }
+}
+
+impl App {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let mut m = BTreeMap::new();
+        m.insert(ProjectId(Uuid::now_v7()), Project::with_title("1"));
+        m.insert(ProjectId(Uuid::now_v7()), Project::with_title("2"));
+        Self {
+            state: None,
+            projects: m,
+            active_proj: None,
+            input_buffer: String::new(),
+        }
+    }
+
+    fn top_menu(&mut self, ui: &mut Ui) {
+        Panel::top("top_menu").show_inside(ui, |ui| {
+            MenuBar::new().ui(ui, |ui| {
+                ui.menu_button("Projects", |ui| {
+                    if ui.button("Create New Project").clicked() {
+                        self.state = Some(State::ModalNewProject);
+                    }
+                    ui.separator();
+
+                    for (id, projx) in self.projects.iter() {
+                        if ui.button(&projx.title).clicked() {
+                            self.state = Some(State::SwitchProject(*id, None));
+                        }
+                    }
+                });
+            });
+        });
+    }
+
+    fn bottom_panel(&mut self, ui: &mut Ui) {
+        Panel::bottom("bottom_panel").show_inside(ui, |ui| {
+            let label = match self.active_proj {
+                None => "Select Project",
+                Some(proj_id) => {
+                    let proj = self.projects.get(&proj_id).unwrap();
+                    &proj.title
+                }
+            };
+            ui.label(label);
+        });
+    }
+
+    fn todo_sidebar(&mut self, ui: &mut Ui) {
+        Panel::left("todo_list")
+            .size_range(Rangef::new(
+                ui.available_width() / 6.,
+                ui.available_width() / 3.,
+            ))
+            .show_inside(ui, |ui| {
+                ui.take_available_width();
+                Panel::bottom("completed_panel")
+                    .resizable(true)
+                    .show_inside(ui, |ui| {
+                        ui.collapsing("completed todos", |ui| {
+                            ui.take_available_height();
+                            if let Some(proj_id) = self.active_proj {
+                                let proj = self.projects.get_mut(&proj_id).unwrap();
+                                ScrollArea::vertical().show(ui, |ui| {
+                                    for (idx, todo) in proj.todos.iter_mut() {
+                                        ui.horizontal_top(|ui| {
+                                            if todo.done {
+                                                ui.checkbox(&mut todo.done, "");
+                                                if ui
+                                                    .add(
+                                                        Label::new(
+                                                            RichText::new(&todo.title).weak(),
+                                                        )
+                                                        .sense(Sense::click())
+                                                        .selectable(false),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    self.state =
+                                                        Some(State::SwitchTodo(proj_id, *idx));
+                                                }
+
+                                                ui.with_layout(
+                                                    Layout::right_to_left(Align::Min),
+                                                    |ui| {
+                                                        if ui
+                                                            .add(
+                                                                Label::new(
+                                                                    RichText::new("X").heading(),
+                                                                )
+                                                                .sense(Sense::click())
+                                                                .selectable(false),
+                                                            )
+                                                            .clicked()
+                                                        {
+                                                            self.state =
+                                                                Some(State::MarkTodoForDeletion(
+                                                                    proj_id, *idx,
+                                                                ));
+                                                        }
+                                                    },
+                                                );
+                                            }
+                                        });
+                                    }
+                                });
+                            }
+                        });
+                    });
+
+                ScrollArea::vertical().show(ui, |ui| {
+                    if let Some(proj_id) = self.active_proj {
+                        if ui.button("+").clicked() {
+                            self.state = Some(State::ModalNewTodo(proj_id));
+                        }
+                        let proj = self.projects.get_mut(&proj_id).unwrap();
+                        for (idx, todo) in proj.todos.iter_mut().rev() {
+                            ui.horizontal_top(|ui| {
+                                if !todo.done {
+                                    ui.checkbox(&mut todo.done, "");
+
+                                    if ui
+                                        .add(
+                                            Label::new(RichText::new(&todo.title).heading())
+                                                .sense(Sense::click())
+                                                .selectable(false),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.state = Some(State::SwitchTodo(proj_id, *idx));
+                                    }
+
+                                    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                                        if ui
+                                            .add(
+                                                Label::new(RichText::new("X").heading())
+                                                    .sense(Sense::click())
+                                                    .selectable(false),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.state =
+                                                Some(State::MarkTodoForDeletion(proj_id, *idx));
+                                        }
+                                    });
+                                }
+                            });
+                        }
+                    } else {
+                        ui.label("Select A Project");
+                    }
+                });
+            });
+    }
+
+    fn new_project(&mut self, ui: &mut Ui) {
+        let modal = Modal::new(Id::from("new project modal")).show(ui, |ui| {
+            let response = ui.text_edit_singleline(&mut self.input_buffer);
+            if self.input_buffer.trim().is_empty() {
+                response.request_focus();
+            }
+            let success = response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+            if success || ui.button("Create").clicked() {
+                if !self.input_buffer.trim().is_empty() {
+                    let new_proj_id = ProjectId(Uuid::now_v7());
+                    let new_proj = Project {
+                        title: mem::take(&mut self.input_buffer),
+                        todos: BTreeMap::new(),
+                    };
+                    self.projects.insert(new_proj_id, new_proj);
+
+                    self.state = Some(State::SwitchProject(new_proj_id, None));
+                    self.active_proj = Some(new_proj_id);
+                    ui.close();
+                }
+            }
+        });
+
+        if modal.should_close() && matches!(self.state, Some(State::ModalNewProject)) {
+            self.state = Some(State::Home(None));
+        }
+    }
+
+    fn new_todo(&mut self, ui: &mut Ui, proj_id: ProjectId) {
+        let modal = Modal::new(Id::from("new todo modal")).show(ui, |ui| {
+            let response = ui.text_edit_singleline(&mut self.input_buffer);
+            if self.input_buffer.trim().is_empty() {
+                response.request_focus();
+            }
+            let success = response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+            if success || ui.button("Create").clicked() {
+                if !self.input_buffer.trim().is_empty() {
+                    let new_todo_id = TodoId(Uuid::now_v7());
+                    let new_todo = Todo {
+                        title: mem::take(&mut self.input_buffer),
+                        desc: Vec::new(),
+                        done: false,
+                    };
+                    let mut proj = self.projects.get_mut(&proj_id).unwrap();
+                    proj.todos.insert(new_todo_id, new_todo);
+
+                    self.state = Some(State::SwitchTodo(proj_id, new_todo_id));
+                    ui.close();
+                }
+            }
+        });
+
+        if modal.should_close() && matches!(self.state, Some(State::ModalNewTodo(_))) {
+            self.state = Some(State::Home(None));
+        }
+    }
+
+    fn new_desc(&mut self, ui: &mut Ui, proj_id: ProjectId, todo_id: TodoId) {
+        let modal = Modal::new(Id::from("new description modal")).show(ui, |ui| {
+            let response = ui.text_edit_multiline(&mut self.input_buffer);
+            if self.input_buffer.trim().is_empty() {
+                response.request_focus();
+            }
+            let success = response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+            if success || ui.button("Create").clicked() {
+                if !self.input_buffer.trim().is_empty() {
+                    let mut proj = self.projects.get_mut(&proj_id).unwrap();
+                    let mut todo = proj.todos.get_mut(&todo_id).unwrap();
+                    todo.desc.push(self.input_buffer.clone());
+
+                    self.input_buffer.clear();
+                    self.state = Some(State::Home(Some(todo_id)));
+                    ui.close();
+                }
+            }
+        });
+
+        if modal.should_close() && matches!(self.state, Some(State::ModalNewDesc(_, _))) {
+            self.state = Some(State::Home(Some(todo_id)));
+        }
+    }
+
+    fn confirm_todo_deletion(&mut self, ui: &mut Ui, proj_id: ProjectId, todo_id: TodoId) {
+        let modal = Modal::new(Id::from("confirm todo delete")).show(ui, |ui| {
+            ui.add(Label::new("Confirm delete?").selectable(false));
+            let response = ui.horizontal(|ui| {
+                if ui
+                    .button(RichText::new("Delete").color(Color32::LIGHT_RED))
+                    .clicked()
+                {
+                    let proj = self.projects.get_mut(&proj_id).unwrap();
+                    proj.todos.remove(&todo_id);
+                    self.state = None;
+                    ui.close();
+                }
+
+                if ui.button("Cancel").clicked() {
+                    self.state = None;
+                    ui.close();
+                }
+            });
+            response.response.request_focus();
+        });
+
+        if modal.should_close() && matches!(self.state, Some(State::MarkTodoForDeletion(_, _))) {
+            self.state = Some(State::Home(Some(todo_id)));
+        }
+    }
+
+    fn descriptions_central(&mut self, ui: &mut Ui, proj_id: ProjectId, todo_id: TodoId) {
+        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+            if ui.button("+").clicked() {
+                self.state = Some(State::ModalNewDesc(proj_id, todo_id));
+            }
+        });
+
+        ui.label(format!("{}", todo_id.0));
+        ui.separator();
+        let proj = self.projects.get(&proj_id).unwrap();
+        let todo = proj.todos.get(&todo_id).unwrap();
+        for desc in todo.desc.iter().rev() {
+            ui.add(Label::new(desc).selectable(false));
+            ui.separator();
+        }
+    }
+}
+
+impl eframe::App for App {
+    fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
+        self.top_menu(ui);
+
+        self.bottom_panel(ui);
+
+        CentralPanel::default().show_inside(ui, |ui| {
+            self.todo_sidebar(ui);
+
+            if let Some(state) = self.state {
+                match state {
+                    State::SwitchProject(to_proj_id, to_todo_id) => {
+                        self.active_proj = Some(to_proj_id);
+                    }
+                    State::ModalNewProject => {
+                        self.new_project(ui);
+                    }
+                    State::ModalNewTodo(proj_id) => {
+                        self.new_todo(ui, proj_id);
+                    }
+                    State::MarkTodoForDeletion(proj_id, todo_id) => {
+                        self.confirm_todo_deletion(ui, proj_id, todo_id);
+                    }
+                    State::SwitchTodo(proj_id, todo_id) => {
+                        self.descriptions_central(ui, proj_id, todo_id);
+                    }
+                    State::ModalNewDesc(proj_id, todo_id) => {
+                        self.new_desc(ui, proj_id, todo_id);
+                    }
+                    State::Home(Some(todo_id)) => {
+                        if let Some(active_proj) = self.active_proj {
+                            let proj = self.projects.get(&active_proj).unwrap();
+                            if let Some((todo_id, _)) = proj.todos.get_key_value(&todo_id) {
+                                self.descriptions_central(ui, active_proj, *todo_id);
+                            }
+                        }
+                    }
+                    State::Home(None) => {}
+                }
+            }
+        });
+    }
+}
