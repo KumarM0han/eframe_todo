@@ -70,12 +70,35 @@ impl Project {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let mut m = BTreeMap::new();
-        m.insert(ProjectId(Uuid::now_v7()), Project::with_title("1"));
-        m.insert(ProjectId(Uuid::now_v7()), Project::with_title("2"));
+        let mut fonts = FontDefinitions::default();
+        fonts.font_data.insert("Noto".to_owned(),
+        std::sync::Arc::new(
+            FontData::from_static(include_bytes!("../assets/NotoMono-Regular.ttf"))
+        )
+        );
+
+        // Put my font first (highest priority):
+        fonts.families.get_mut(&FontFamily::Proportional).unwrap()
+            .insert(0, "Noto".to_owned());
+
+        // Put my font as last fallback for monospace:
+        fonts.families.get_mut(&FontFamily::Monospace).unwrap()
+            .push("Noto".to_owned());
+
+        let mut style = (*cc.egui_ctx.style()).clone();
+        style.text_styles = [
+            (TextStyle::Heading, FontId::new(30.0, FontFamily::Proportional)),
+            (TextStyle::Body, FontId::new(18.0, FontFamily::Proportional)),
+            (TextStyle::Monospace, FontId::new(14.0, FontFamily::Proportional)),
+            (TextStyle::Button, FontId::new(14.0, FontFamily::Proportional)),
+            (TextStyle::Small, FontId::new(10.0, FontFamily::Proportional)),
+        ]
+        .into();
+        cc.egui_ctx.set_style(style);
+
         Self {
             state: None,
-            projects: m,
+            projects: BTreeMap::new(),
             active_proj: None,
             input_buffer: String::new(),
         }
