@@ -12,6 +12,7 @@ enum State {
     SwitchProject(ProjectId, Option<TodoId>),
     SwitchTodo(ProjectId, TodoId),
     MarkTodoForDeletion(ProjectId, TodoId),
+    MarkProjectForDeletion(ProjectId),
 
     Home(Option<TodoId>),
 }
@@ -42,59 +43,52 @@ pub struct App {
     input_buffer: String,
 }
 
-impl Project {
-    fn with_title(title: &str) -> Self {
-        let mut todos = BTreeMap::new();
-        todos.insert(
-            TodoId(Uuid::now_v7()),
-            Todo {
-                title: "demo".to_string(),
-                desc: Vec::new(),
-                done: false,
-            },
-        );
-        todos.insert(
-            TodoId(Uuid::now_v7()),
-            Todo {
-                title: "demo".to_string(),
-                desc: Vec::new(),
-                done: false,
-            },
-        );
-        Self {
-            title: title.to_string(),
-            todos: todos,
-        }
-    }
-}
-
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut fonts = FontDefinitions::default();
-        fonts.font_data.insert("Noto".to_owned(),
-        std::sync::Arc::new(
-            FontData::from_static(include_bytes!("../assets/NotoMono-Regular.ttf"))
-        )
+        fonts.font_data.insert(
+            "Noto".to_owned(),
+            std::sync::Arc::new(FontData::from_static(include_bytes!(
+                "../assets/NotoMono-Regular.ttf"
+            ))),
         );
 
         // Put my font first (highest priority):
-        fonts.families.get_mut(&FontFamily::Proportional).unwrap()
+        fonts
+            .families
+            .get_mut(&FontFamily::Proportional)
+            .unwrap()
             .insert(0, "Noto".to_owned());
 
         // Put my font as last fallback for monospace:
-        fonts.families.get_mut(&FontFamily::Monospace).unwrap()
+        fonts
+            .families
+            .get_mut(&FontFamily::Monospace)
+            .unwrap()
             .push("Noto".to_owned());
 
-        let mut style = (*cc.egui_ctx.style()).clone();
+        let mut style = (*cc.egui_ctx.global_style()).clone();
         style.text_styles = [
-            (TextStyle::Heading, FontId::new(30.0, FontFamily::Proportional)),
+            (
+                TextStyle::Heading,
+                FontId::new(30.0, FontFamily::Proportional),
+            ),
             (TextStyle::Body, FontId::new(18.0, FontFamily::Proportional)),
-            (TextStyle::Monospace, FontId::new(14.0, FontFamily::Proportional)),
-            (TextStyle::Button, FontId::new(14.0, FontFamily::Proportional)),
-            (TextStyle::Small, FontId::new(10.0, FontFamily::Proportional)),
+            (
+                TextStyle::Monospace,
+                FontId::new(14.0, FontFamily::Proportional),
+            ),
+            (
+                TextStyle::Button,
+                FontId::new(14.0, FontFamily::Proportional),
+            ),
+            (
+                TextStyle::Small,
+                FontId::new(10.0, FontFamily::Proportional),
+            ),
         ]
         .into();
-        cc.egui_ctx.set_style(style);
+        cc.egui_ctx.set_global_style(style);
 
         Self {
             state: None,
@@ -125,14 +119,24 @@ impl App {
 
     fn bottom_panel(&mut self, ui: &mut Ui) {
         Panel::bottom("bottom_panel").show_inside(ui, |ui| {
-            let label = match self.active_proj {
-                None => "Select Project",
-                Some(proj_id) => {
-                    let proj = self.projects.get(&proj_id).unwrap();
-                    &proj.title
-                }
-            };
-            ui.label(label);
+            ui.horizontal(|ui| {
+                let label = match self.active_proj {
+                    None => "Select Project",
+                    Some(proj_id) => {
+                        let proj = self.projects.get(&proj_id).unwrap();
+                        &proj.title
+                    }
+                };
+                ui.label(label);
+
+                ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                    if let Some(active_proj) = self.active_proj
+                        && ui.button("Delete Project").clicked()
+                    {
+                        self.state = Some(State::MarkProjectForDeletion(active_proj));
+                    }
+                });
+            });
         });
     }
 
@@ -250,19 +254,17 @@ impl App {
                 response.request_focus();
             }
             let success = response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-            if success || ui.button("Create").clicked() {
-                if !self.input_buffer.trim().is_empty() {
-                    let new_proj_id = ProjectId(Uuid::now_v7());
-                    let new_proj = Project {
-                        title: mem::take(&mut self.input_buffer),
-                        todos: BTreeMap::new(),
-                    };
-                    self.projects.insert(new_proj_id, new_proj);
+            if (success || ui.button("Create").clicked()) && !self.input_buffer.trim().is_empty() {
+                let new_proj_id = ProjectId(Uuid::now_v7());
+                let new_proj = Project {
+                    title: mem::take(&mut self.input_buffer),
+                    todos: BTreeMap::new(),
+                };
+                self.projects.insert(new_proj_id, new_proj);
 
-                    self.state = Some(State::SwitchProject(new_proj_id, None));
-                    self.active_proj = Some(new_proj_id);
-                    ui.close();
-                }
+                self.state = Some(State::SwitchProject(new_proj_id, None));
+                self.active_proj = Some(new_proj_id);
+                ui.close();
             }
         });
 
@@ -278,20 +280,18 @@ impl App {
                 response.request_focus();
             }
             let success = response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-            if success || ui.button("Create").clicked() {
-                if !self.input_buffer.trim().is_empty() {
-                    let new_todo_id = TodoId(Uuid::now_v7());
-                    let new_todo = Todo {
-                        title: mem::take(&mut self.input_buffer),
-                        desc: Vec::new(),
-                        done: false,
-                    };
-                    let mut proj = self.projects.get_mut(&proj_id).unwrap();
-                    proj.todos.insert(new_todo_id, new_todo);
+            if (success || ui.button("Create").clicked()) && !self.input_buffer.trim().is_empty() {
+                let new_todo_id = TodoId(Uuid::now_v7());
+                let new_todo = Todo {
+                    title: mem::take(&mut self.input_buffer),
+                    desc: Vec::new(),
+                    done: false,
+                };
+                let proj = self.projects.get_mut(&proj_id).unwrap();
+                proj.todos.insert(new_todo_id, new_todo);
 
-                    self.state = Some(State::SwitchTodo(proj_id, new_todo_id));
-                    ui.close();
-                }
+                self.state = Some(State::SwitchTodo(proj_id, new_todo_id));
+                ui.close();
             }
         });
 
@@ -307,16 +307,14 @@ impl App {
                 response.request_focus();
             }
             let success = response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-            if success || ui.button("Create").clicked() {
-                if !self.input_buffer.trim().is_empty() {
-                    let mut proj = self.projects.get_mut(&proj_id).unwrap();
-                    let mut todo = proj.todos.get_mut(&todo_id).unwrap();
-                    todo.desc.push(self.input_buffer.clone());
+            if (success || ui.button("Create").clicked()) && !self.input_buffer.trim().is_empty() {
+                let proj = self.projects.get_mut(&proj_id).unwrap();
+                let todo = proj.todos.get_mut(&todo_id).unwrap();
+                todo.desc.push(mem::take(&mut self.input_buffer));
 
-                    self.input_buffer.clear();
-                    self.state = Some(State::Home(Some(todo_id)));
-                    ui.close();
-                }
+                self.input_buffer.clear();
+                self.state = Some(State::Home(Some(todo_id)));
+                ui.close();
             }
         });
 
@@ -352,6 +350,32 @@ impl App {
         }
     }
 
+    fn confirm_project_deletion(&mut self, ui: &mut Ui, proj_id: ProjectId) {
+        let modal = Modal::new(Id::from("confirm project delete")).show(ui, |ui| {
+            ui.add(Label::new("Confirm delete?").selectable(false));
+            let response = ui.horizontal(|ui| {
+                if ui
+                    .button(RichText::new("Delete").color(Color32::LIGHT_RED))
+                    .clicked()
+                {
+                    self.projects.remove(&proj_id);
+                    self.state = None;
+                    ui.close();
+                }
+
+                if ui.button("Cancel").clicked() {
+                    self.state = None;
+                    ui.close();
+                }
+            });
+            response.response.request_focus();
+        });
+
+        if modal.should_close() && matches!(self.state, Some(State::MarkProjectForDeletion(_))) {
+            self.state = Some(State::Home(None));
+        }
+    }
+
     fn descriptions_central(&mut self, ui: &mut Ui, proj_id: ProjectId, todo_id: TodoId) {
         ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
             if ui.button("+").clicked() {
@@ -371,7 +395,7 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut Ui, _: &mut eframe::Frame) {
         self.top_menu(ui);
 
         self.bottom_panel(ui);
@@ -381,8 +405,9 @@ impl eframe::App for App {
 
             if let Some(state) = self.state {
                 match state {
-                    State::SwitchProject(to_proj_id, to_todo_id) => {
+                    State::SwitchProject(to_proj_id, _to_todo_id) => {
                         self.active_proj = Some(to_proj_id);
+                        self.state = Some(State::Home(None));
                     }
                     State::ModalNewProject => {
                         self.new_project(ui);
@@ -392,6 +417,12 @@ impl eframe::App for App {
                     }
                     State::MarkTodoForDeletion(proj_id, todo_id) => {
                         self.confirm_todo_deletion(ui, proj_id, todo_id);
+                    }
+                    State::MarkProjectForDeletion(proj_id) => {
+                        self.confirm_project_deletion(ui, proj_id);
+                        if self.state.is_none() {
+                            self.active_proj = None;
+                        }
                     }
                     State::SwitchTodo(proj_id, todo_id) => {
                         self.descriptions_central(ui, proj_id, todo_id);
