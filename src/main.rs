@@ -1,9 +1,19 @@
 mod app;
-use std::fs;
 
 use app::*;
 
-fn main() {
+#[cfg(target_os = "linux")]
+fn get_options() -> eframe::NativeOptions {
+    let native_options = eframe::NativeOptions {
+        viewport: eframe::egui::ViewportBuilder::default(),
+        ..Default::default()
+    };
+
+    native_options
+}
+
+#[cfg(target_os = "windows")]
+fn get_options() -> eframe::NativeOptions {
     let ico_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("assets/clipboard_paste_20260217012532.png.ico");
     let icon_file = fs::File::open(ico_path).unwrap();
@@ -25,9 +35,13 @@ fn main() {
         ..Default::default()
     };
 
+    native_options
+}
+
+fn main() {
     let _ = eframe::run_native(
         "Todo",
-        native_options,
+        get_options(),
         Box::new(|cc| Ok(Box::new(App::new(cc)))),
     );
 }
