@@ -16,7 +16,7 @@ fn get_options() -> eframe::NativeOptions {
 fn get_options() -> eframe::NativeOptions {
     let ico_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("assets/clipboard_paste_20260217012532.png.ico");
-    let icon_file = fs::File::open(ico_path).unwrap();
+    let icon_file = std::fs::File::open(ico_path).unwrap();
     let icon_dir = ico::IconDir::read(icon_file).unwrap();
     let largest_entry = icon_dir
         .entries()
