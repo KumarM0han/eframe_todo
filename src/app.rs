@@ -1,3 +1,4 @@
+use chrono::{DateTime, Local};
 use eframe::egui::*;
 use std::collections::BTreeMap;
 use std::mem;
@@ -30,8 +31,16 @@ struct TodoId(Uuid);
 
 struct Todo {
     title: String,
-    desc: Vec<String>,
+    desc: Vec<Description>,
     done: bool,
+    created: DateTime<Local>,
+    // could have used done: Option<DateTime<Local>> but then we'll lose ui.checkbox(&mut done, ...) below
+    completed: Option<DateTime<Local>>,
+}
+
+struct Description {
+    description: String,
+    created: DateTime<Local>,
 }
 
 pub struct App {
@@ -41,6 +50,7 @@ pub struct App {
     state: Option<State>,
     active_proj: Option<ProjectId>,
     input_buffer: String,
+    opened_at: DateTime<Local>,
 }
 
 impl App {
@@ -95,6 +105,7 @@ impl App {
             projects: BTreeMap::new(),
             active_proj: None,
             input_buffer: String::new(),
+            opened_at: Local::now(),
         }
     }
 
@@ -160,6 +171,11 @@ impl App {
                                         ui.horizontal_top(|ui| {
                                             if todo.done {
                                                 ui.checkbox(&mut todo.done, "");
+
+                                                if todo.completed.is_none() {
+                                                    todo.completed = Some(Local::now());
+                                                }
+
                                                 if ui
                                                     .add(
                                                         Label::new(
@@ -212,6 +228,7 @@ impl App {
                             ui.horizontal_top(|ui| {
                                 if !todo.done {
                                     ui.checkbox(&mut todo.done, "");
+                                    todo.completed = None;
 
                                     if ui
                                         .add(
@@ -286,6 +303,8 @@ impl App {
                     title: mem::take(&mut self.input_buffer),
                     desc: Vec::new(),
                     done: false,
+                    created: Local::now(),
+                    completed: None,
                 };
                 let proj = self.projects.get_mut(&proj_id).unwrap();
                 proj.todos.insert(new_todo_id, new_todo);
@@ -310,7 +329,10 @@ impl App {
             if (success || ui.button("Create").clicked()) && !self.input_buffer.trim().is_empty() {
                 let proj = self.projects.get_mut(&proj_id).unwrap();
                 let todo = proj.todos.get_mut(&todo_id).unwrap();
-                todo.desc.push(mem::take(&mut self.input_buffer));
+                todo.desc.push(Description {
+                    description: mem::take(&mut self.input_buffer),
+                    created: Local::now(),
+                });
 
                 self.input_buffer.clear();
                 self.state = Some(State::Home(Some(todo_id)));
@@ -382,13 +404,21 @@ impl App {
                 self.state = Some(State::ModalNewDesc(proj_id, todo_id));
             }
         });
+        let proj = self.projects.get(&proj_id).unwrap();
+        let todo = proj.todos.get(&todo_id).unwrap();
 
         ui.label(format!("{}", todo_id.0));
         ui.separator();
-        let proj = self.projects.get(&proj_id).unwrap();
-        let todo = proj.todos.get(&todo_id).unwrap();
+        if todo.done {
+            let delta = todo.completed.unwrap() - todo.created;
+            ui.add(Label::new(format!("Completed in {} days", delta.num_days())).selectable(false));
+        } else {
+            let delta = self.opened_at - todo.created;
+            ui.add(Label::new(format!("Open for {} days", delta.num_days())).selectable(false));
+        }
         for desc in todo.desc.iter().rev() {
-            ui.add(Label::new(desc).selectable(false));
+            ui.add(Label::new(format!("{}", desc.created)).selectable(false));
+            ui.add(Label::new(&desc.description).selectable(false));
             ui.separator();
         }
     }
