@@ -50,7 +50,6 @@ pub struct App {
     state: Option<State>,
     active_proj: Option<ProjectId>,
     input_buffer: String,
-    opened_at: DateTime<Local>,
 }
 
 impl App {
@@ -105,7 +104,6 @@ impl App {
             projects: BTreeMap::new(),
             active_proj: None,
             input_buffer: String::new(),
-            opened_at: Local::now(),
         }
     }
 
@@ -170,10 +168,9 @@ impl App {
                                     for (idx, todo) in proj.todos.iter_mut() {
                                         ui.horizontal_top(|ui| {
                                             if todo.done {
-                                                ui.checkbox(&mut todo.done, "");
-
-                                                if todo.completed.is_none() {
-                                                    todo.completed = Some(Local::now());
+                                                let changed_response = ui.checkbox(&mut todo.done, "");
+                                                if changed_response.changed() {
+                                                    todo.completed = None;
                                                 }
 
                                                 if ui
@@ -227,8 +224,10 @@ impl App {
                         for (idx, todo) in proj.todos.iter_mut().rev() {
                             ui.horizontal_top(|ui| {
                                 if !todo.done {
-                                    ui.checkbox(&mut todo.done, "");
-                                    todo.completed = None;
+                                    let changed_response = ui.checkbox(&mut todo.done, "");
+                                    if changed_response.changed() {
+                                        todo.completed = Some(Local::now());
+                                    }
 
                                     if ui
                                         .add(
@@ -386,7 +385,7 @@ impl App {
                 }
 
                 if ui.button("Cancel").clicked() {
-                    self.state = None;
+                    self.state = Some(State::Home(None));
                     ui.close();
                 }
             });
@@ -413,7 +412,7 @@ impl App {
             let delta = todo.completed.unwrap() - todo.created;
             ui.add(Label::new(format!("Completed in {} days", delta.num_days())).selectable(false));
         } else {
-            let delta = self.opened_at - todo.created;
+            let delta = Local::now() - todo.created;
             ui.add(Label::new(format!("Open for {} days", delta.num_days())).selectable(false));
         }
         for desc in todo.desc.iter().rev() {
